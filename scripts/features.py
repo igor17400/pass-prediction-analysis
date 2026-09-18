@@ -103,18 +103,3 @@ def pass_features(passes: pl.DataFrame) -> pl.DataFrame:
         sin_a=dy / (dx**2 + dy**2).sqrt().clip(lower_bound=1e-6),
         under_pressure=pl.col("under_pressure").cast(pl.Float32),
     )
-
-
-if __name__ == "__main__":
-    from pathlib import Path
-
-    cache = Path(__file__).resolve().parents[1] / "cache"
-    passes = pl.read_parquet(cache / "passes.parquet").with_columns(pid=pl.col("event_id"))
-    frames = pl.read_parquet(cache / "frames.parquet")
-    meta = passes.select("pid", "match_id", "possession", "comp", "split", "completed")
-    tf = tree_features(passes, frames)
-    assert not (set(tf.columns) & LEAK_COLS)
-    tf.join(meta, on="pid").write_parquet(cache / "tree_features.parquet")
-    node_features(passes, frames).write_parquet(cache / "node_features.parquet")
-    pass_features(passes).join(meta, on="pid").write_parquet(cache / "pass_features.parquet")
-    print(tf.describe())

@@ -46,16 +46,16 @@ scored on identical rows by one function with one bootstrap.
 
 ```
 uv sync
-uv run python scripts/build_dataset.py   # needs cache/ populated, see below
-uv run python scripts/features.py
-uv run python scripts/train_baselines.py
-uv run python scripts/train_tree.py
-uv run python scripts/deep.py
-uv run python scripts/evaluate.py
-uv run python scripts/surfaces.py
+uv run python scripts/build_dataset.py   # parse StatsBomb JSON in cache/ into two parquet tables
+uv run marimo edit train.py              # one cell per model: baselines, LightGBM, GAT, evaluation, app artifacts
+uv run python train.py                   # same notebook, top to bottom, no UI
 uv run pytest
-uv run marimo edit --sandbox app.py
+uv run marimo edit app.py                # the deployed page; reads public/data/ only
 ```
+
+Layout: `scripts/build_dataset.py` parses the raw JSON and assigns splits; `scripts/features.py`,
+`scripts/deep.py` and `scripts/metrics.py` hold the feature builders, the GAT model and the bootstrap
+metrics that both notebooks share; `train.py` trains and evaluates; `app.py` renders.
 
 Data is not in the repo. Fetch `matches/{9/281,11/90,7/108,7/235}.json`, and the `events/` and
 `three-sixty/` files for each match with `match_status_360 == "available"`, from
@@ -71,7 +71,7 @@ offline; the app only reads the 70 kB of parquet in `public/data/`.
 - `build_dataset.py` asserts every match and every (match, possession) sits in exactly one split,
   that every team attacks left to right (own keeper mean x 8.7, opposing keeper 115.3), and that the
   frame's actor stands on the event location (median offset 0.0).
-- `evaluate.py` asserts all prediction files cover identical (pass, match, label) rows before scoring.
+- The evaluation cell in `train.py` asserts all prediction files cover identical (pass, match, label) rows before scoring.
 
 ## Limitations
 
