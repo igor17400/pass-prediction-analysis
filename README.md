@@ -15,10 +15,10 @@ freeze frame says about a single pass.
 
 | Model | Log loss [95% CI] | Brier [95% CI] | ROC AUC [95% CI] | Completed-pass error per match [95% CI] | Params | Train (s) |
 |---|---|---|---|---|---|---|
-| Constant rate | 0.3632 [0.3463, 0.3814] | 0.1041 [0.0975, 0.1112] | 0.500 | 14.95 [11.30, 18.57] | 0 | 0 |
-| Length x third lookup | 0.3115 [0.2939, 0.3301] | 0.0912 [0.0851, 0.0975] | 0.766 [0.747, 0.780] | 15.56 [12.02, 19.02] | 0 | 0 |
-| LightGBM | **0.1748** [0.1603, 0.1896] | **0.0528** [0.0483, 0.0576] | **0.947** [0.940, 0.954] | 6.80 [5.05, 8.95] | 37,170 | 5 |
-| Graph attention net | 0.1787 [0.1649, 0.1935] | 0.0541 [0.0497, 0.0585] | 0.945 [0.940, 0.951] | **6.46** [4.77, 8.51] | 106,637 | 90 |
+| Constant rate | 0.3632 [0.3463, 0.3814] | 0.1041 [0.0975, 0.1112] | 0.500 | 14.95 [9.88, 21.04] | 0 | 0 |
+| Length x third lookup | 0.3115 [0.2939, 0.3301] | 0.0912 [0.0851, 0.0975] | 0.766 [0.747, 0.780] | 15.56 [12.65, 18.74] | 0 | 0 |
+| LightGBM | **0.1748** [0.1603, 0.1896] | **0.0528** [0.0483, 0.0576] | **0.947** [0.940, 0.954] | 6.80 [4.87, 9.08] | 37,170 | 5 |
+| Graph attention net | 0.1787 [0.1649, 0.1935] | 0.0541 [0.0497, 0.0585] | 0.945 [0.940, 0.951] | **6.46** [4.21, 9.22] | 106,637 | 90 |
 
 CIs are percentile bootstraps over test matches (500 draws). Completed-pass error is the absolute
 difference between predicted and actual completed passes per match, in passes. LightGBM parameters
