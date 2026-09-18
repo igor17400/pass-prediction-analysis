@@ -1,0 +1,12 @@
+cache/
+*.json
+!data/*.json
+.venv/
+__pycache__/
+site/
+*.pt
+*.pth
+.pytest_cache/
+.ruff_cache/
+__marimo__/
+.DS_Store
