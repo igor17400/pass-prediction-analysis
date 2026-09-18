@@ -6,7 +6,8 @@ from sklearn.metrics import roc_auc_score
 
 def _point(df: pl.DataFrame) -> dict:
     y, p = df["completed"].to_numpy().astype(float), df["p"].to_numpy().clip(1e-6, 1 - 1e-6)
-    per_match = df.group_by("match_id").agg((pl.col("p").sum() - pl.col("completed").sum()).abs().alias("err"))
+    # a bootstrap draw can contain the same match twice; "draw" keeps those copies as separate matches
+    per_match = df.group_by("match_id", "draw").agg((pl.col("p").sum() - pl.col("completed").sum()).abs().alias("err"))
     return dict(
         log_loss=float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))),
         brier=float(np.mean((y - p) ** 2)),
@@ -17,6 +18,7 @@ def _point(df: pl.DataFrame) -> dict:
 
 def evaluate(df: pl.DataFrame, n_boot: int = 500, seed: int = 0) -> dict:
     """df has pid, match_id, completed, p. Bootstrap resamples matches with replacement."""
+    df = df.with_columns(draw=pl.lit(0))
     point = _point(df)
     matches = df["match_id"].unique().to_numpy()
     rng = np.random.default_rng(seed)
@@ -24,7 +26,7 @@ def evaluate(df: pl.DataFrame, n_boot: int = 500, seed: int = 0) -> dict:
     boots = []
     for _ in range(n_boot):
         pick = rng.choice(matches, size=len(matches), replace=True)
-        boots.append(_point(pl.concat([parts[(m,)] for m in pick])))
+        boots.append(_point(pl.concat([parts[(m,)].with_columns(draw=pl.lit(i)) for i, m in enumerate(pick)])))
     out = {}
     for k, v in point.items():
         lo, hi = np.nanpercentile([b[k] for b in boots], [2.5, 97.5])

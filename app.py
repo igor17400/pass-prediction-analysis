@@ -254,9 +254,9 @@ def _(alt, breakdown, error_map, mo, pitch_layers, pl):
             mo.ui.altair_chart(chart2),
             mo.md(
                 f"""
-- **A** (x {_best['x1']:.0f}-{_best['x2']:.0f}, y {_best['y1']:.0f}-{_best['y2']:.0f}, {_best['n']} passes): the GAT's largest edge, {_best['diff']:+.3f} log loss ({_best['pct']:+.0f}%). Its completion rate is {_best['completion_rate']:.2f}, so this is contested space where the exact arrangement of defenders matters more than counts in a radius.
-- **B** (x {_worst['x1']:.0f}-{_worst['x2']:.0f}, y {_worst['y1']:.0f}-{_worst['y2']:.0f}, {_worst['n']} passes): the tree's largest edge, {_worst['diff']:+.3f}. Small cells like this are where a 107k-parameter network with 26 epochs of data over-commits and a shallow tree ensemble does not.
-- **C** the penalty area (x over 100, central): passes into the box average {_box_d:+.3f} for the GAT over {int(_box['n'].sum())} passes, against {_own_d:+.3f} in the defensive third over {int(_own['n'].sum())}. The set-based model earns what little it earns where passes are hardest; in safe areas the two are indistinguishable.
+- **A** (x {_best['x1']:.0f}-{_best['x2']:.0f}, y {_best['y1']:.0f}-{_best['y2']:.0f}, {_best['n']} passes): the GAT's largest edge, {_best['diff']:+.3f} log loss ({_best['pct']:+.0f}%). Passes arriving at the edge of the box, where the receiver is marked and the exact arrangement of the two or three nearest defenders decides the outcome; this is what a set-based model is for, and it shows up, but only here.
+- **B** (x {_worst['x1']:.0f}-{_worst['x2']:.0f}, y {_worst['y1']:.0f}-{_worst['y2']:.0f}, {_worst['n']} passes): the tree's largest edge, {_worst['diff']:+.3f}. Corner and touchline cells hold a few dozen test passes each and the broadcast frame is often cropped there; the GAT extrapolates badly at the boundary while the tree's bounded features degrade gracefully.
+- **C** the penalty area (x over 100, central): passes into the box net {_box_d:+.3f} for the GAT over {int(_box['n'].sum())} passes, against {_own_d:+.3f} in the defensive third over {int(_own['n'].sum())}. Where passes are easy the tree's twenty features are sufficient statistics and the GAT only adds variance; the small GAT gains sit where passes are hard, and the long-ball losses (30+ units, see table) outweigh them.
 """
             ),
             mo.ui.table(_bd, selection=None, show_column_summaries=False, pagination=False),
