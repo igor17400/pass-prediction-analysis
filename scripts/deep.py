@@ -96,8 +96,9 @@ def main() -> None:
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     lossf = nn.BCEWithLogitsLoss()
     x, pad, p = T["train"]
+    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=2)
     bs, best, best_state, bad, t0, epoch = 512, 9.0, None, 0, time.time(), 0
-    while time.time() - t0 < WALL_S and bad < 3:
+    while time.time() - t0 < WALL_S and bad < 8:
         model.train()
         perm = torch.randperm(len(x))
         for i in range(0, len(x), bs):
@@ -111,6 +112,7 @@ def main() -> None:
         pv = predict(model, *T["val"], dev)
         val = float(-np.mean(Y["val"].numpy() * np.log(pv + 1e-6) + (1 - Y["val"].numpy()) * np.log(1 - pv + 1e-6)))
         epoch += 1
+        sched.step(val)
         print(f"epoch {epoch} val logloss {val:.4f} ({time.time() - t0:.0f}s)", flush=True)
         if val < best:
             best, bad, best_state = val, 0, {k: v.detach().clone() for k, v in model.state_dict().items()}
