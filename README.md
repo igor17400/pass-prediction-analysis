@@ -1,6 +1,6 @@
-# Pitch Nets: can a graph attention network read a pass better than a gradient-boosted tree?
+# Pass Prediction Analysis: can a graph attention network read a pass better than a gradient-boosted tree?
 
-**Live app: https://igorazevedo.com/pitch-nets/**
+**Live app: https://igorazevedo.com/pass-prediction-analysis/**
 
 **Question.** Given a StatsBomb 360 freeze frame (every visible player) and a pass's start and end,
 how likely is the pass to be completed: LightGBM on hand-crafted frame features, or a graph attention

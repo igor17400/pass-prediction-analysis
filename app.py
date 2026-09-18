@@ -278,7 +278,7 @@ chronological within each competition-season (70/15/15); an assertion checks tha
 Two trivial baselines (constant rate; completion rate by length bin and end third) were fixed before any model was trained.
 LightGBM: 25-trial random search on validation log loss, early stopping. GAT: 3 blocks of 4-head attention over player tokens
 plus a pass token, with a learned attention bias from each pair's relative offset; AdamW, early stopping on validation log loss,
-12-minute wall-clock cap (it stopped itself after 90 s). Code and reproduction steps: [github.com/igor17400/pitch-nets](https://github.com/igor17400/pitch-nets).
+12-minute wall-clock cap (it stopped itself after 90 s). Code and reproduction steps: [github.com/igor17400/pass-prediction-analysis](https://github.com/igor17400/pass-prediction-analysis).
 """
     )
     return
