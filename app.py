@@ -83,7 +83,7 @@ def _(alt, examples, mo):
         for r in examples.iter_rows(named=True)
     }
     pick = mo.ui.dropdown(options={v: k for k, v in _labels.items()}, value=list(_labels.values())[0], label="Situation")
-    alt.data_transformers.disable_max_rows()
+    _ = alt.data_transformers.disable_max_rows()
     return (pick,)
 
 
@@ -203,7 +203,7 @@ def _(comparison, mo, pl):
 @app.cell
 def _(alt, breakdown, error_map, mo, pitch_layers, pl):
     _em = error_map.with_columns(x1=pl.col("cx") * 10, x2=pl.col("cx") * 10 + 10, y1=pl.col("cy") * 10, y2=pl.col("cy") * 10 + 10, pct=100 * pl.col("diff") / pl.col("ll_tree"))
-    _lim = float(_em["diff"].abs().max())
+    _lim = 0.08  # clamp: two corner cells with 16-37 passes sit at -0.3 and would wash out the interior
     _heat = (
         alt.Chart(_em)
         .mark_rect(stroke="#fafafa", strokeWidth=0.5)
@@ -212,7 +212,7 @@ def _(alt, breakdown, error_map, mo, pitch_layers, pl):
             x2="x2:Q",
             y=alt.Y("y1:Q", scale=alt.Scale(domain=[80, 0]), axis=None),
             y2="y2:Q",
-            color=alt.Color("diff:Q", scale=alt.Scale(scheme="redblue", domain=[-_lim, _lim]), title=["Tree log loss", "minus GAT log loss"]),
+            color=alt.Color("diff:Q", scale=alt.Scale(scheme="redblue", domain=[-_lim, _lim], clamp=True), title=["Tree log loss", "minus GAT log loss", "(clamped at ±0.08)"]),
             tooltip=[
                 alt.Tooltip("n:Q", title="test passes"),
                 alt.Tooltip("completion_rate:Q", format=".2f", title="completion rate"),
