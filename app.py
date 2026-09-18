@@ -4,6 +4,7 @@
 #     "marimo",
 #     "polars",
 #     "altair",
+#     "pyarrow",
 # ]
 # ///
 
@@ -46,7 +47,16 @@ async def _(Path, io, mo, pl, sys):
     surfaces = await load("surfaces.parquet")
     error_map = await load("error_map.parquet")
     breakdown = await load("breakdown.parquet")
-    return breakdown, comparison, error_map, examples, players, surfaces
+    gat_history = await load("gat_history.parquet")
+    return (
+        breakdown,
+        comparison,
+        error_map,
+        examples,
+        gat_history,
+        players,
+        surfaces,
+    )
 
 
 @app.cell
@@ -79,7 +89,15 @@ def _(mo):
     leaves the passer's foot, what is the probability the pass reaches a teammate? Clubs call this an
     xPass or pass-completion model. It is used to price the risk of a pass, to credit players who
     complete passes harder than expected, and in match review to ask "what were the options here".
-    The label is simply whether StatsBomb recorded the pass as completed.
+    The label is simply whether StatsBomb recorded the pass as completed. Formally, for pass $i$ with
+    label $y_i \in \{0, 1\}$, pass vector $u_i$ (start, end, pressure) and frame $\mathcal{F}_i = \{x_{ij}\}$
+    (one row per visible player: position, teammate flag, keeper flag), every model estimates
+
+    $$\hat p_i = P\left(y_i = 1 \mid u_i, \mathcal{F}_i\right)$$
+
+    and every model is fitted and judged by the same binary cross-entropy (log loss)
+
+    $$\mathcal{L} = -\frac{1}{N}\sum_{i=1}^{N}\left[y_i \log \hat p_i + (1 - y_i)\log(1 - \hat p_i)\right].$$
 
     **The real question is about representation, not accuracy.** A StatsBomb 360 freeze frame is a
     set of players with positions and team labels. There are two ways to hand that set to a model:
@@ -103,30 +121,60 @@ def _(mo):
     | **LightGBM** | 30 hand-made numbers summarising the pass and the frame. | Axis-aligned thresholds on fixed-radius counts and distances. | 37,170 | 0.1748 |
     | **Graph attention net** | The frame itself: every visible player as a token, plus a pass token. | Learned pairwise attention, biased by relative offset. | 106,637 | 0.1787 |
 
-    **Constant rate.** Predicts the training-set completion rate, 0.872, for every pass. It answers
-    "how much does the label explain by itself" and is the floor for log loss.
+    **Constant rate.** Predicts the training-set completion rate for every pass,
+    $\hat p_i = \bar y_{\text{train}} = 0.872$. It answers "how much does the label explain by itself"
+    and is the floor for log loss.
 
     **Length x third lookup.** An 18-cell table: completion rate in training data by pass length bin
     (under 10, 10 to 20, ..., 50 and over) crossed with the third of the pitch the pass ends in. It
     captures the two things everyone already knows, that long passes and passes into the final third
-    fail more, with no learning beyond counting.
+    fail more, with no learning beyond counting:
+    $\hat p_i = \bar y_{\text{train}}\big[\,\text{bin}(\ell_i),\ \text{third}(x^{\text{end}}_i)\,\big]$.
 
     **LightGBM.** The freeze frame is reduced to 30 scalars before the model ever sees it: pass geometry
     (length, angle, start and end, distance to goal, whether the target is in the box); what is around the
     target (nearest opponent, opponents within 3, 6 and 10 units, nearest teammate, teammates within 6);
     what is along the lane (opponents within 2, 4 and 8 units of the segment, the closest one); pressure
-    on the passer and the nearest opponent to him; and the opposing keeper's depth. A 590-tree ensemble
-    with 63 leaves splits on thresholds of these numbers, which is why its surface in chart 1 is blocky.
+    on the passer and the nearest opponent to him; and the opposing keeper's depth. Call that vector
+    $\phi(u_i, \mathcal{F}_i) \in \mathbb{R}^{30}$. Gradient boosting fits an additive model of $M$ regression trees
+    on the logit scale,
+
+    $$F_M(\phi) = \sum_{m=1}^{M} \eta\, f_m(\phi), \qquad \hat p_i = \sigma\big(F_M(\phi_i)\big),$$
+
+    where each new tree $f_m$ minimises the second-order expansion of the log loss around the current
+    ensemble, with gradient $g_i = \hat p_i - y_i$ and Hessian $h_i = \hat p_i (1 - \hat p_i)$:
+
+    $$f_m = \arg\min_f \sum_i \left[ g_i f(\phi_i) + \tfrac{1}{2} h_i f(\phi_i)^2 \right] + \lambda \lVert w_f \rVert^2 .$$
+
+    LightGBM grows each tree leaf-wise (always splitting the leaf with the largest loss reduction) with
+    histogram-binned features. The search settled on $M = 590$ trees of 63 leaves, $\eta = 0.02$,
+    $\lambda = 10$, feature fraction 0.8, and early stopping on validation log loss. Trees split on
+    thresholds of these numbers, which is why its surface in chart 1 is blocky.
     Its strength is that every feature is a sensible football quantity, it trains in five seconds, and
     it degrades gracefully. Its weakness is that the radii are guesses and the identity of *which*
     defender is where is lost in the counting.
 
     **Graph attention net.** The frame stays a set. Every visible player becomes a token of 13 numbers:
     position, teammate and keeper flags, offset from the pass start and from the pass end, distance to
-    the lane and where along it. A fourteenth token carries the pass itself. Three rounds of four-head
-    attention let every token look at every other token, with a small network turning each pair's
-    relative offset into an attention bias, so "who is close to whom" enters the model directly rather
-    than through a chosen radius. The prediction is read from the pass token. In principle it can learn
+    the lane and where along it. A fourteenth token carries the pass itself. Tokens enter as
+
+    $$h_0^{(0)} = W_{\text{pass}}\, u_i, \qquad h_j^{(0)} = W_{\text{node}}\, x_{ij}, \quad j = 1 \dots n_i .$$
+
+    Three blocks of four-head attention let every token look at every other token. In head $a$ of a
+    block, the weight token $j$ puts on token $k$ is
+
+    $$\alpha^{a}_{jk} = \operatorname{softmax}_k\left( \frac{(W^a_Q h_j)^\top (W^a_K h_k)}{\sqrt{d}} + b^{a}_\theta(\Delta_{jk}) \right),
+    \qquad \Delta_{jk} = \big(x_j - x_k,\ y_j - y_k,\ \lVert (x_j, y_j) - (x_k, y_k) \rVert\big),$$
+
+    where $b_\theta$ is a two-layer network that turns each pair's relative offset into one additive bias
+    per head. That term is the edge feature of the graph: "who is close to whom" enters the model
+    directly rather than through a chosen radius, and padded slots get $-\infty$. Each block then applies
+
+    $$h_j \leftarrow h_j + \sum_a \sum_k \alpha^{a}_{jk}\, W^a_V\, h_k, \qquad
+    h_j \leftarrow h_j + \operatorname{FFN}\big(\operatorname{LN}(h_j)\big),$$
+
+    and the prediction is read from the pass token, $\hat p_i = \sigma\big(w^\top \operatorname{MLP}(\operatorname{LN}(h_0))\big)$,
+    with $d = 64$ and 106,637 parameters in total. In principle it can learn
     any configuration pattern: a defender between two teammates, a keeper covering a channel, a marker
     on the receiver's blind side. In practice its 107k parameters must learn pitch geometry from 76k
     training passes, and it starts to overfit after about ten epochs.
@@ -363,6 +411,77 @@ def _(breakdown, mo, pl):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## 4. How the models were trained and scored
+
+    **Data.** 108,034 open-play passes with a 360 frame from 127 club matches. Splits are by match and
+    chronological within each competition-season: the first 70% of matches train (75,579 passes), the next
+    15% validate (16,269), the last 15% test (15,186, 18 matches). Set pieces are excluded. A test in the
+    repo asserts that no match or possession straddles a split.
+
+    **LightGBM.** 25 random configurations from a grid over leaves $\{15, 31, 63, 127\}$, learning rate
+    $\{0.02, 0.05, 0.1\}$, minimum child samples $\{20, 50, 200\}$, feature fraction $\{0.6, 0.8, 1.0\}$
+    and $\lambda \in \{0, 1, 10\}$. Each runs up to 2,000 rounds and stops after 50 rounds without
+    improvement on validation log loss. The best configuration is refitted once on train at its
+    early-stopped round count. Search 84 s, refit 5 s.
+
+    **Graph attention net.** AdamW with learning rate $10^{-3}$ and weight decay $10^{-4}$, batch size
+    512, binary cross-entropy on logits. After every epoch the whole validation set is scored; the learning
+    rate halves after two epochs without improvement, and training stops after eight, or at a 12-minute
+    wall clock. The weights with the best validation log loss are kept. It ran 26 epochs in about 90 s on
+    Apple MPS; the curve below shows validation loss bottoming out around epoch 18 while training loss
+    keeps falling, the usual signature of a model with more capacity than the data supports.
+    """)
+    return
+
+
+@app.cell
+def _(alt, gat_history, mo, pl):
+    curve = gat_history.unpivot(index=["epoch"], on=["train_log_loss", "val_log_loss"], variable_name="series", value_name="log_loss").with_columns(
+        pl.col("series").replace({"train_log_loss": "train", "val_log_loss": "validation"})
+    )
+    best_epoch = gat_history.sort("val_log_loss").head(1)
+    lines = (
+        alt.Chart(curve)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("epoch:Q", title="epoch"),
+            y=alt.Y("log_loss:Q", title="log loss", scale=alt.Scale(zero=False)),
+            color=alt.Color("series:N", scale=alt.Scale(domain=["train", "validation"], range=["#9aa0a6", "#1f77b4"]), legend=alt.Legend(title=None, orient="top-right")),
+            tooltip=[alt.Tooltip("epoch:Q"), alt.Tooltip("series:N"), alt.Tooltip("log_loss:Q", format=".4f")],
+        )
+    )
+    mark = alt.Chart(best_epoch).mark_rule(stroke="#1f77b4", strokeDash=[4, 3]).encode(x="epoch:Q")
+    tree_line = alt.Chart(pl.DataFrame({"y": [0.1707]})).mark_rule(stroke="#d62728", strokeDash=[2, 2]).encode(y="y:Q")
+    label = alt.Chart(pl.DataFrame({"x": [1.2], "y": [0.1707], "t": ["LightGBM validation log loss"]})).mark_text(align="left", dy=-7, color="#d62728", fontSize=11).encode(x="x:Q", y="y:Q", text="t:N")
+    chart3 = alt.layer(lines, mark, tree_line, label).properties(width=720, height=280, title=alt.Title("Graph attention net learning curve", anchor="start", fontSize=14)).configure(background="#fafafa")
+    mo.ui.altair_chart(chart3)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    **Metrics.** All four models are scored on the identical 15,186 test passes, in one function.
+
+    - Log loss, as above.
+    - Brier score $\frac{1}{N}\sum_i (\hat p_i - y_i)^2$.
+    - ROC AUC, the probability a random completed pass is ranked above a random incomplete one.
+    - Completed-pass error per match, in passes: $\frac{1}{M}\sum_{m=1}^{M}\Big|\sum_{i \in m}\hat p_i - \sum_{i \in m} y_i\Big|$,
+      so an analyst can read the calibration error in the units the club reports.
+
+    **Uncertainty.** Passes within a match are not independent, so every interval resamples the 18 test
+    matches with replacement (500 draws) and reports the 2.5th and 97.5th percentiles. The head-to-head
+    uses a paired version: the same resampled matches are scored by both models and the difference in log
+    loss is bootstrapped directly. That gives tree minus GAT $= -0.0040$, 95% CI $[-0.0088, +0.0006]$,
+    with the GAT ahead in 4.5% of draws. Overlapping per-model intervals would have said nothing; the
+    paired interval says the tree is very probably, but not certainly, the better model here.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ## Reproduce
 
     108,034 open-play passes with a 360 frame from 127 club matches, split 70/15/15 by match and chronologically within each
@@ -370,11 +489,6 @@ def _(mo):
     notebook with one cell per model. Code, data instructions and leakage checks:
     [github.com/igor17400/pass-prediction-analysis](https://github.com/igor17400/pass-prediction-analysis).
     """)
-    return
-
-
-@app.cell
-def _():
     return
 
 

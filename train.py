@@ -209,6 +209,7 @@ def _(mo):
 @app.cell
 def _(
     CACHE,
+    DATA,
     PRED_COLS,
     PlayerGAT,
     build_tensors,
@@ -239,20 +240,24 @@ def _(
     x_tr, pad_tr, p_tr = tensors["train"]
     y_val = labels["val"].numpy()
     best_val, best_state, bad, epoch = 9.0, None, 0, 0
+    history = []
     t0 = time.time()
     while time.time() - t0 < WALL_S and bad < 8:
         gat.train()
         perm = torch.randperm(len(x_tr))
+        running = 0.0
         for i in range(0, len(x_tr), 512):
             idx = perm[i : i + 512]
             loss = loss_fn(gat(x_tr[idx].to(dev), pad_tr[idx].to(dev), p_tr[idx].to(dev)), labels["train"][idx].to(dev))
             opt.zero_grad()
             loss.backward()
             opt.step()
+            running += loss.item() * len(idx)
         pv = predict(gat, *tensors["val"], dev)
         val = float(-np.mean(y_val * np.log(pv + 1e-6) + (1 - y_val) * np.log(1 - pv + 1e-6)))
         epoch += 1
         sched.step(val)
+        history.append(dict(epoch=epoch, train_log_loss=running / len(x_tr), val_log_loss=val, lr=opt.param_groups[0]["lr"], seconds=time.time() - t0))
         print(f"epoch {epoch:2d}  val log loss {val:.4f}  ({time.time() - t0:.0f}s)")
         if val < best_val:
             best_val, bad, best_state = val, 0, {k: v.detach().clone() for k, v in gat.state_dict().items()}
@@ -265,6 +270,7 @@ def _(
     pl.concat(
         [gat_splits[s].select(PRED_COLS).with_columns(p=pl.Series(predict(gat, *tensors[s], dev).astype(np.float64))) for s in gat_splits]
     ).write_parquet(CACHE / "preds_gat.parquet")
+    pl.DataFrame(history).write_parquet(DATA / "gat_history.parquet")
     gat_info = dict(n_params=n_params, train_s=gat_train_s, epochs=epoch, best_val_logloss=best_val, device=str(dev))
     json.dump(gat_info, open(CACHE / "gat_info.json", "w"), indent=1)
     print(f"{n_params} params, {epoch} epochs, {gat_train_s:.0f}s on {dev}, best val {best_val:.4f}")
@@ -325,6 +331,7 @@ def _(mo):
 def _(
     DATA,
     build_tensors,
+    dev,
     frames,
     gat,
     lgbm,
@@ -335,7 +342,6 @@ def _(
     pl,
     predict,
     test_preds,
-    torch,
     tree_features,
 ):
     GX, GY = np.arange(2, 120, 4.0), np.arange(2, 80, 4.0)
